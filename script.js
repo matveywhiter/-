@@ -1,86 +1,91 @@
 (function () {
     'use strict';
 
-    function TorrServerAutoSwitch() {
-        // Ваш список серверов
-        var server_list = [
+    // Настройки
+    var settings = {
+        // Список серверов (ВАЖНО: если Lampa открыта через HTTPS, эти http ссылки могут блокироваться)
+        servers: [
             'http://77.110.96.33:443',
             'http://45.81.35.99:8443',
             'http://95.81.127.99:8443'
-        ];
+        ],
+        timeout: 3000 // Тайм-аут ожидания ответа (3 сек)
+    };
 
-        // Максимальное время ожидания ответа от сервера (в миллисекундах)
-        var timeout_ms = 3000; 
-
-        this.init = function () {
-            // Запускаем проверку при старте Lampa
-            if (window.appready) {
-                this.checkServers();
-            } else {
-                Lampa.Listener.follow('app', function (e) {
-                    if (e.type == 'ready') new TorrServerAutoSwitch().checkServers();
-                });
-            }
-        };
-
-        this.checkServers = function () {
-            console.log('TS Balancer: Начинаю проверку серверов...');
-            
-            var promises = server_list.map(function (url) {
-                return new Promise(function (resolve) {
-                    var start_time = Date.now();
-                    var controller = new AbortController();
-                    var timeoutId = setTimeout(function() { controller.abort(); }, timeout_ms);
-
-                    // Пытаемся получить ответ от /echo
-                    fetch(url + '/echo', { 
-                        method: 'GET',
-                        signal: controller.signal
-                    })
-                    .then(function (response) {
-                        clearTimeout(timeoutId);
-                        if (response.ok) {
-                            var duration = Date.now() - start_time;
-                            resolve({ url: url, status: 'online', ping: duration });
-                        } else {
-                            resolve({ url: url, status: 'error', ping: 99999 });
-                        }
-                    })
-                    .catch(function (err) {
-                        clearTimeout(timeoutId);
-                        resolve({ url: url, status: 'offline', ping: 99999 });
-                    });
-                });
-            });
-
-            Promise.all(promises).then(function (results) {
-                // Оставляем только рабочие и сортируем по пингу (от меньшего к большему)
-                var working_servers = results.filter(function(r) { 
-                    return r.status === 'online'; 
-                }).sort(function(a, b) { 
-                    return a.ping - b.ping; 
-                });
-
-                if (working_servers.length > 0) {
-                    var best = working_servers[0];
-                    var current = Lampa.Storage.get('torrserver_url','');
-
-                    // Если лучший сервер отличается от того, что сейчас стоит
-                    if (current !== best.url) {
-                        Lampa.Storage.set('torrserver_url', best.url);
-                        Lampa.Storage.set('torrserver_url_main', best.url); // Для совместимости с разными версиями
-                        
-                        Lampa.Noty.show('TorrServer: Автопереключение на ' + best.url + ' (' + best.ping + 'ms)');
-                        console.log('TS Balancer: Установлен сервер ' + best.url);
-                    } else {
-                        console.log('TS Balancer: Текущий сервер и так самый быстрый');
-                    }
-                } else {
-                    Lampa.Noty.show('Внимание: Ни один TorrServer из списка не доступен!');
-                }
-            });
-        };
+    function startPlugin() {
+        console.log('TorrServer Balancer: Плагин инициализирован');
+        
+        // Проверяем серверы
+        checkServers();
     }
 
-    new TorrServerAutoSwitch().init();
+    function checkServers() {
+        var promises = settings.servers.map(function (url) {
+            return new Promise(function (resolve) {
+                var start = Date.now();
+                var xhr = new XMLHttpRequest();
+                
+                // Используем /echo для быстрой проверки
+                xhr.open('GET', url + '/echo', true);
+                xhr.timeout = settings.timeout;
+
+                xhr.onload = function () {
+                    if (xhr.status >= 200 && xhr.status < 300) {
+                        resolve({ url: url, ping: Date.now() - start, status: true });
+                    } else {
+                        resolve({ url: url, ping: 9999, status: false });
+                    }
+                };
+
+                xhr.onerror = function () { resolve({ url: url, ping: 9999, status: false }); };
+                xhr.ontimeout = function () { resolve({ url: url, ping: 9999, status: false }); };
+
+                xhr.send();
+            });
+        });
+
+        Promise.all(promises).then(function (results) {
+            var working = results.filter(function (r) { return r.status; });
+            
+            // Сортировка по пингу
+            working.sort(function (a, b) { return a.ping - b.ping; });
+
+            if (working.length > 0) {
+                var best = working[0];
+                console.log('TorrServer Balancer: Лучший сервер', best);
+                
+                // Установка в Lampa
+                if (window.Lampa) {
+                    var current = Lampa.Storage.get('torrserver_url','');
+                    if(current !== best.url){
+                         Lampa.Storage.set('torrserver_url', best.url);
+                         Lampa.Storage.set('torrserver_url_main', best.url);
+                         Lampa.Noty.show('TS Balancer: Выбран ' + best.url + ' (' + best.ping + 'ms)');
+                    }
+                }
+            } else {
+                console.log('TorrServer Balancer: Нет доступных серверов');
+                if (window.Lampa) Lampa.Noty.show('TS Balancer: Все серверы недоступны!');
+            }
+        });
+    }
+
+    // Запуск плагина после загрузки Lampa
+    if (window.appready) {
+        startPlugin();
+    } else {
+        // Слушатель для старых и новых версий Lampa
+        var eventListener = function(e) {
+            if (e.type === 'ready') startPlugin();
+        };
+        
+        if (window.Lampa && Lampa.Listener) {
+            Lampa.Listener.follow('app', eventListener);
+        } else {
+            // Фолбек если API Lampa еще не загрузился
+            window.addEventListener('load', function() {
+                setTimeout(startPlugin, 2000); 
+            });
+        }
+    }
 })();
