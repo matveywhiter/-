@@ -6,9 +6,7 @@
         shodan_key: 'fQnKzzdjBblqbYHvPAYkuBKNuswxWS3d', 
         // Ваши проверенные серверы (резерв)
         static_servers: [
-            'http://77.110.96.33:443',
-            'http://45.81.35.99:8443',
-            'http://95.81.127.99:8443'
+           
         ],
         timeout: 4000
     };
