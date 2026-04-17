@@ -6,7 +6,14 @@
         shodan_key: 'fQnKzzdjBblqbYHvPAYkuBKNuswxWS3d', 
         // Ваши проверенные серверы (резерв)
         static_servers: [
-           
+           'http://77.110.96.33:443',
+            'http://45.81.35.99:8443',
+            'http://95.81.127.99:8443',
+            'http://95.84.5.35:8090',
+            'https://lam.maxvol.pro/ts',
+            'https://ts.maxvol.pro/',
+            'http://213.165.32.104:8443',
+            'http://109.120.150.237:8443'
         ],
         timeout: 4000
     };
